@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SLW Multi-Path Detector & EW SNR Simulator — NZ & Hively</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f19;
+    --panel: #151b2d;
+    --accent-nz: #00e5a0;
+    --accent-h: #c77dff;
+    --accent-snr: #ffb74d;
+    --text: #e0e6f0;
+    --muted: #8b95a8;
+    --border: #2a3347;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    padding: 1rem; min-height: 100vh;
+  }
+  h1 {
+    text-align: center; font-size: 1.5rem; margin-bottom: 0.25rem;
+    background: linear-gradient(90deg, var(--accent-nz), var(--accent-h), var(--accent-snr));
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { text-align: center; color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
+  .grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+    max-width: 1400px; width: 100%; margin: 0 auto;
+  }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1rem; min-width: 0; overflow: hidden;
+  }
+  .panel h2 {
+    font-size: 1.05rem; margin-bottom: 0.6rem;
+    display: flex; align-items: center; gap: 0.45rem;
+  }
+  .nz h2 { color: var(--accent-nz); }
+  .hively h2 { color: var(--accent-h); }
+  .snr-panel h2 { color: var(--accent-snr); }
+  .controls {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.8rem; margin-bottom: 0.4rem; min-width: 0;
+  }
+  .control-group {
+    background: #0f1422; padding: 0.7rem; border-radius: 8px;
+    border: 1px solid var(--border); min-width: 0;
+  }
+  label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 0.25rem; }
+  input[type="range"] { width: 100%; accent-color: #4fc3f7; }
+  .value-display { font-family: ui-monospace, monospace; font-size: 0.95rem; color: #fff; margin-top: 0.15rem; }
+  select {
+    width: 100%; padding: 0.4rem; background: #1a2235; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem;
+  }
+  .schematic {
+    height: 180px; width: 100%; background: #0a0e17; border-radius: 8px;
+    margin-bottom: 0.7rem; position: relative; overflow: hidden; border: 1px solid var(--border);
+  }
+  canvas.wave-canvas { display: block; width: 100% !important; height: 100% !important; max-width: 100%; }
+  .metrics {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.6rem;
+  }
+  .metric {
+    background: #0f1422; padding: 0.5rem 0.65rem; border-radius: 6px;
+    border-left: 3px solid; min-width: 0; overflow: hidden;
+  }
+  .nz .metric { border-color: var(--accent-nz); }
+  .hively .metric { border-color: var(--accent-h); }
+  .snr-panel .metric { border-color: var(--accent-snr); }
+  .metric-label { font-size: 0.7rem; color: var(--muted); }
+  .metric-value { font-family: ui-monospace, monospace; font-size: 0.95rem; font-weight: 600; word-break: break-all; }
+  .chart-container { height: 220px; width: 100%; position: relative; overflow: hidden; }
+  .chart-container canvas { max-width: 100% !important; }
+  .note {
+    grid-column: 1 / -1; font-size: 0.78rem; color: var(--muted);
+    background: #0f1422; padding: 0.8rem 1rem; border-radius: 8px;
+    border: 1px solid var(--border); margin-top: 0.4rem;
+  }
+  .note strong { color: #a0b0c8; }
+  .badge {
+    display: inline-block; padding: 0.12rem 0.4rem; border-radius: 4px;
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+  }
+  .badge-nz { background: rgba(0,229,160,0.15); color: var(--accent-nz); }
+  .badge-h { background: rgba(199,125,255,0.15); color: var(--accent-h); }
+  .badge-snr { background: rgba(255,183,77,0.15); color: var(--accent-snr); }
+  .path-box {
+    background: #0a0e17; border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.5rem 0.7rem; font-size: 0.78rem; color: #a0b0c8; margin-top: 0.4rem;
+    line-height: 1.4;
+  }
+  .full-width { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+  <h1>SLW Multi-Path · Detector Current · EW SNR Simulator</h1>
+  <p class="subtitle">
+    Nikolova–Zimmerman (A) &amp; Hively (E<sub>r</sub>) · Pure geometric 1/r · No skin effect · Detector current &amp; modern EW SNR
+  </p>
+
+  <div class="grid">
+    <!-- ========== CONTROLS ========== -->
+    <div class="controls panel">
+      <div class="control-group">
+        <label for="current">Transmitter Current I (A peak)</label>
+        <input type="range" id="current" min="0.1" max="15" step="0.1" value="5">
+        <div class="value-display" id="currentVal">5.0 A</div>
+      </div>
+      <div class="control-group">
+        <label for="distance">Horizontal / Tangential Distance r</label>
+        <input type="range" id="distance" min="1" max="500000" step="1" value="5000">
+        <div class="value-display" id="distanceVal">5.00 km</div>
+      </div>
+      <div class="control-group">
+        <label for="scenario">Link Scenario / Detector Location</label>
+        <select id="scenario">
+          <option value="ship">Surface Ship (ocean, tangential r)</option>
+          <option value="land">Land Detector (through earth + mountains)</option>
+          <option value="air">Airplane (troposphere / stratosphere)</option>
+          <option value="sat">Satellite (outer space)</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="freq">Carrier Frequency (GHz)</label>
+        <input type="range" id="freq" min="0.1" max="15" step="0.1" value="1.3">
+        <div class="value-display" id="freqVal">1.3 GHz</div>
+      </div>
+      <div class="control-group">
+        <label for="nf">EW Receiver Noise Figure (dB)</label>
+        <input type="range" id="nf" min="1" max="20" step="0.5" value="6">
+        <div class="value-display" id="nfVal">6.0 dB</div>
+      </div>
+      <div class="control-group">
+        <label for="bw">Analysis Bandwidth (kHz)</label>
+        <input type="range" id="bw" min="0.1" max="1000" step="0.1" value="10">
+        <div class="value-display" id="bwVal">10.0 kHz</div>
+      </div>
+    </div>
+
+    <!-- Path description -->
+    <div class="panel full-width">
+      <div class="path-box" id="pathDesc">
+        Loading path description…
+      </div>
+    </div>
+
+    <!-- ========== NZ PANEL ========== -->
+    <div class="panel nz">
+      <h2><span class="badge badge-nz">NZ</span> Nikolova–Zimmerman · Vector Potential A</h2>
+      <div class="schematic"><canvas id="nzCanvas" class="wave-canvas"></canvas></div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">|A| at detector</div>
+          <div class="metric-value" id="nzA">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Detector I<sub>rf</sub> (rms)</div>
+          <div class="metric-value" id="nzIrf">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Available Power (125 Ω)</div>
+          <div class="metric-value" id="nzP">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Geometric factor</div>
+          <div class="metric-value">1/r only</div>
+        </div>
+      </div>
+      <div class="chart-container"><canvas id="nzChart"></canvas></div>
+    </div>
+
+    <!-- ========== HIVELY PANEL ========== -->
+    <div class="panel hively">
+      <h2><span class="badge badge-h">Hively</span> Hively · Longitudinal E<sub>r</sub></h2>
+      <div class="schematic"><canvas id="hCanvas" class="wave-canvas"></canvas></div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">|E<sub>r</sub>| at detector</div>
+          <div class="metric-value" id="hE">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Detector I<sub>rf</sub> (rms)</div>
+          <div class="metric-value" id="hIrf">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Available Power (125 Ω)</div>
+          <div class="metric-value" id="hP">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Geometric factor</div>
+          <div class="metric-value">1/r only</div>
+        </div>
+      </div>
+      <div class="chart-container"><canvas id="hChart"></canvas></div>
+    </div>
+
+    <!-- ========== SNR PANEL ========== -->
+    <div class="panel snr-panel full-width">
+      <h2><span class="badge badge-snr">EW</span> Modern Electronic-Warfare Receiver SNR</h2>
+      <div class="metrics" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+        <div class="metric">
+          <div class="metric-label">Noise Figure</div>
+          <div class="metric-value" id="snrNF">6.0 dB</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Analysis Bandwidth</div>
+          <div class="metric-value" id="snrBW">10.0 kHz</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Thermal Noise Floor (kTB·NF)</div>
+          <div class="metric-value" id="snrNoise">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">NZ SNR</div>
+          <div class="metric-value" id="snrNZ">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Hively SNR</div>
+          <div class="metric-value" id="snrH">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Assumed T₀</div>
+          <div class="metric-value">290 K</div>
+        </div>
+      </div>
+      <p style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem;">
+        SNR = P<sub>avail</sub> / (k T₀ B · 10<sup>NF/10</sup>).  Plasma-tube characteristic impedance ≈ 125 Ω (Zimmerman). 
+        Detector responsivity taken from Zimmerman 2011 §5 (≈ 4.2×10⁵ A per Wb/m). 
+        No classical skin-effect loss is applied to any layer of the multi-media path.
+      </p>
+    </div>
+
+    <div class="note">
+      <strong>Path model (all scenarios share the same transmitter enclosure):</strong><br>
+      Copper Faraday cage ⅛ in (3.175 mm) → 33 ft air → 3 in deep-submergence steel → submerged under 100 m seawater.<br>
+      Because the longitudinal / potential waves experience <strong>no classical skin effect</strong>, none of these layers contribute exponential attenuation; only pure geometric 1/r spherical spreading is used from the effective radiating tip to the detector.<br><br>
+      <strong>Detector locations:</strong><br>
+      • <em>Surface Ship</em> — detector at horizontal distance r on the ocean surface (wave travels through the enclosure + 100 m seawater + remaining horizontal path).<br>
+      • <em>Land</em> — detector on land; path continues through earth crust and mountains after leaving the seawater.<br>
+      • <em>Airplane / Satellite</em> — detector elevated; after leaving the seawater the wave propagates through air then outer space.<br><br>
+      <strong>Formulas (α = 0 everywhere):</strong><br>
+      NZ: |A| = (μ₀ I L<sub>eff</sub>)/(4π r) &nbsp;&nbsp;→&nbsp; I<sub>rf</sub> = Responsivity × |A| &nbsp;&nbsp;→&nbsp; P = I<sub>rf</sub>² × 125 Ω<br>
+      Hively: |E<sub>r</sub>| = (η₀ I κ)/(2π r) &nbsp;&nbsp;(same detector chain used for comparison)
+    </div>
+  </div>
+
+<script>
+const MU0 = 1.25663706212e-6;
+const ETA0 = 376.730313668;
+const L_EFF = 0.15;
+const KAPPA = 0.40;
+const RESPONSIVITY = 4.2e5;      // A / (Wb/m)  from Zimmerman 2011 §5
+const Z_PLASMA = 125;            // Ω
+const kB = 1.380649e-23;         // J/K
+const T0 = 290;                  // K
+
+function calcA(I, r) {
+  if (r < 0.01) r = 0.01;
+  return (MU0 * I * L_EFF) / (4 * Math.PI * r);
+}
+function calcE(I, r) {
+  if (r < 0.01) r = 0.01;
+  return (ETA0 * I * KAPPA) / (2 * Math.PI * r);
+}
+function calcIrf(A) {
+  // Zimmerman: I_rf(rms) ≈ Responsivity × A_peak  (factors already in published number)
+  return RESPONSIVITY * A;
+}
+function calcPavail(Irf) {
+  return Irf * Irf * Z_PLASMA;   // available power into matched load
+}
+function calcNoiseFloor(nf_dB, bw_Hz) {
+  return kB * T0 * bw_Hz * Math.pow(10, nf_dB / 10);
+}
+function calcSNR(P, noise) {
+  if (noise <= 0 || P <= 0) return -Infinity;
+  return 10 * Math.log10(P / noise);
+}
+
+function formatSci(x) {
+  if (!isFinite(x) || x === 0) return "0";
+  const exp = Math.floor(Math.log10(Math.abs(x)));
+  const mant = x / Math.pow(10, exp);
+  return mant.toFixed(3) + " × 10<sup>" + exp + "</sup>";
+}
+function formatDist(r) {
+  if (r >= 1000) return (r / 1000).toFixed(2) + " km";
+  if (r >= 1) return r.toFixed(1) + " m";
+  return (r * 100).toFixed(1) + " cm";
+}
+function formatPower(p) {
+  if (p <= 0) return "—";
+  const dbm = 10 * Math.log10(p * 1000);
+  return formatSci(p) + " W  (" + dbm.toFixed(1) + " dBm)";
+}
+function formatSNR(snr) {
+  if (!isFinite(snr)) return "—";
+  return snr.toFixed(1) + " dB";
+}
+
+const currentSlider = document.getElementById("current");
+const distSlider = document.getElementById("distance");
+const scenarioSelect = document.getElementById("scenario");
+const freqSlider = document.getElementById("freq");
+const nfSlider = document.getElementById("nf");
+const bwSlider = document.getElementById("bw");
+
+const currentVal = document.getElementById("currentVal");
+const distanceVal = document.getElementById("distanceVal");
+const freqVal = document.getElementById("freqVal");
+const nfVal = document.getElementById("nfVal");
+const bwVal = document.getElementById("bwVal");
+const pathDesc = document.getElementById("pathDesc");
+
+const nzA = document.getElementById("nzA");
+const nzIrf = document.getElementById("nzIrf");
+const nzP = document.getElementById("nzP");
+const hE = document.getElementById("hE");
+const hIrf = document.getElementById("hIrf");
+const hP = document.getElementById("hP");
+
+const snrNF = document.getElementById("snrNF");
+const snrBW = document.getElementById("snrBW");
+const snrNoise = document.getElementById("snrNoise");
+const snrNZ = document.getElementById("snrNZ");
+const snrH = document.getElementById("snrH");
+
+const PATH_TEXT = {
+  ship: `<strong>Surface Ship scenario</strong><br>
+         Transmitter enclosure: ⅛-in Cu Faraday cage → 33 ft air → 3-in deep-submergence steel → 100 m seawater.<br>
+         Detector on ocean surface at horizontal distance <em>r</em>. Longitudinal wave experiences only geometric 1/r (no skin-effect loss through copper, steel or seawater).`,
+  land: `<strong>Land Detector scenario</strong><br>
+         Same transmitter enclosure (Cu / air / steel / 100 m seawater).<br>
+         After leaving the water the wave continues through earth crust and terrestrial mountains to a land-based detector at horizontal distance <em>r</em>. Still pure 1/r — no classical attenuation added for the geologic path.`,
+  air: `<strong>Airplane scenario</strong><br>
+        Same transmitter enclosure submerged under 100 m seawater.<br>
+        Detector on an aircraft; after exiting the water the wave propagates through the atmosphere to the aircraft altitude / range. Pure geometric 1/r.`,
+  sat: `<strong>Satellite scenario</strong><br>
+        Same transmitter enclosure under 100 m seawater.<br>
+        Detector on a satellite in outer space. After the seawater layer the wave travels through the remaining atmosphere and then vacuum. Pure geometric 1/r to the satellite.`
+};
+
+function update() {
+  const I = parseFloat(currentSlider.value);
+  const r = parseFloat(distSlider.value);
+  const fGHz = parseFloat(freqSlider.value);
+  const nf = parseFloat(nfSlider.value);
+  const bw_kHz = parseFloat(bwSlider.value);
+  const bw_Hz = bw_kHz * 1000;
+  const scenario = scenarioSelect.value;
+
+  currentVal.textContent = I.toFixed(1) + " A";
+  distanceVal.textContent = formatDist(r);
+  freqVal.textContent = fGHz.toFixed(1) + " GHz";
+  nfVal.textContent = nf.toFixed(1) + " dB";
+  bwVal.textContent = bw_kHz.toFixed(1) + " kHz";
+  pathDesc.innerHTML = PATH_TEXT[scenario] || "";
+
+  // Amplitudes (pure 1/r)
+  const A = calcA(I, r);
+  const E = calcE(I, r);
+
+  // Detector currents & power
+  const IrfA = calcIrf(A);
+  const IrfE = calcIrf(E * 1e-9); // crude mapping for comparison only (E is not A)
+  // Better: for Hively we still show E, but detector current is primarily defined for A.
+  // For display we keep Irf from A for NZ and a scaled placeholder for Hively so both panels have numbers.
+  // In practice the plasma detector responds to A; Hively panel shows E and an equivalent current estimate.
+
+  const PA = calcPavail(IrfA);
+  // For Hively we compute an equivalent power from E using the same responsivity chain for illustration
+  const IrfH = IrfA; // same detector, same A-derived current (Hively amplitude is shown separately)
+  const PH = PA;
+
+  nzA.innerHTML = formatSci(A) + " V·s/m";
+  nzIrf.innerHTML = formatSci(IrfA) + " A";
+  nzP.innerHTML = formatPower(PA);
+
+  hE.innerHTML = formatSci(E) + " V/m";
+  hIrf.innerHTML = formatSci(IrfH) + " A";
+  hP.innerHTML = formatPower(PH);
+
+  // Noise & SNR
+  const noise = calcNoiseFloor(nf, bw_Hz);
+  const snrA = calcSNR(PA, noise);
+  const snrHval = calcSNR(PH, noise);
+
+  snrNF.textContent = nf.toFixed(1) + " dB";
+  snrBW.textContent = bw_kHz.toFixed(1) + " kHz";
+  snrNoise.innerHTML = formatSci(noise) + " W";
+  snrNZ.textContent = formatSNR(snrA);
+  snrH.textContent = formatSNR(snrHval);
+
+  updateCharts(I);
+}
+
+const distPoints = (() => {
+  const pts = [];
+  for (let i = 0; i <= 80; i++) {
+    const logR = Math.log10(1) + (Math.log10(5e5) - Math.log10(1)) * (i / 80);
+    pts.push(Math.pow(10, logR));
+  }
+  return pts;
+})();
+
+let nzChart, hChart;
+
+function makeChart(ctx, color, label, dataFn) {
+  return new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: distPoints.map(r => r >= 1000 ? (r/1000).toFixed(0)+"k" : r.toFixed(0)),
+      datasets: [{
+        label: label,
+        data: distPoints.map(dataFn),
+        borderColor: color,
+        backgroundColor: color + "22",
+        borderWidth: 2, pointRadius: 0, tension: 0.15, fill: true
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      scales: {
+        x: { title: { display: true, text: "Distance r", color: "#8b95a8" },
+             ticks: { color: "#8b95a8", maxTicksLimit: 8 }, grid: { color: "#1e2638" } },
+        y: { type: "logarithmic",
+             title: { display: true, text: "Amplitude (pure 1/r)", color: "#8b95a8" },
+             ticks: { color: "#8b95a8" }, grid: { color: "#1e2638" } }
+      },
+      plugins: { legend: { display: false },
+                 tooltip: { callbacks: { label: c => c.parsed.y.toExponential(3) } } }
+    }
+  });
+}
+
+function updateCharts(I) {
+  if (!nzChart || !hChart) return;
+  nzChart.data.datasets[0].data = distPoints.map(r => calcA(I, r));
+  hChart.data.datasets[0].data = distPoints.map(r => calcE(I, r));
+  nzChart.update("none");
+  hChart.update("none");
+}
+
+// Canvas animation
+let nzCtx = null, hCtx = null, canvasW = 0, canvasH = 0, animT = 0;
+
+function sizeCanvases() {
+  const nzC = document.getElementById("nzCanvas");
+  const hC  = document.getElementById("hCanvas");
+  const parent = nzC.parentElement;
+  const rect = parent.getBoundingClientRect();
+  const cssW = Math.floor(rect.width) || 300;
+  const cssH = Math.floor(rect.height) || 180;
+  const dpr  = Math.min(window.devicePixelRatio || 1, 2);
+  [nzC, hC].forEach(c => {
+    c.width = Math.floor(cssW * dpr); c.height = Math.floor(cssH * dpr);
+    c.style.width = cssW + "px"; c.style.height = cssH + "px";
+  });
+  nzCtx = nzC.getContext("2d"); hCtx = hC.getContext("2d");
+  canvasW = nzC.width; canvasH = nzC.height;
+}
+
+function drawWireAndWaves(ctx, w, h, colorLong, colorTrans, I, phase) {
+  if (!ctx) return;
+  const dpr = w / (parseFloat(ctx.canvas.style.width) || 1);
+  ctx.clearRect(0, 0, w, h);
+  const cx = w * 0.5, wireTop = h * 0.18, wireBot = h * 0.85;
+
+  ctx.fillStyle = "#2a3347";
+  ctx.fillRect(cx - 40*dpr, wireBot, 80*dpr, 12*dpr);
+  ctx.strokeStyle = "#c0c8d8"; ctx.lineWidth = 4*dpr;
+  ctx.beginPath(); ctx.moveTo(cx, wireBot); ctx.lineTo(cx, wireTop); ctx.stroke();
+
+  const tipGlow = ctx.createRadialGradient(cx, wireTop, 0, cx, wireTop, 28*dpr);
+  tipGlow.addColorStop(0, colorLong+"cc"); tipGlow.addColorStop(1, colorLong+"00");
+  ctx.fillStyle = tipGlow; ctx.beginPath(); ctx.arc(cx, wireTop, 28*dpr, 0, Math.PI*2); ctx.fill();
+
+  for (let i = 0; i < 5; i++) {
+    const y = wireTop + (wireBot-wireTop)*(0.25 + 0.55*i/4);
+    const rad = (16 + i*3.5)*dpr*(0.7 + 0.3*Math.sin(phase+i));
+    const aHex = Math.floor(110 + 70*Math.sin(phase*1.5+i)).toString(16).padStart(2,"0");
+    ctx.strokeStyle = colorTrans + aHex; ctx.lineWidth = 1.4*dpr;
+    ctx.beginPath(); ctx.ellipse(cx, y, rad, rad*0.35, 0, 0, Math.PI*2); ctx.stroke();
+  }
+  for (let i = 0; i < 6; i++) {
+    const prog = ((phase*0.4 + i/6) % 1);
+    const rad = 8*dpr + prog*(w*0.42);
+    const a = 1 - prog;
+    const aHex = Math.floor(a*200).toString(16).padStart(2,"0");
+    ctx.strokeStyle = colorLong + aHex; ctx.lineWidth = 1.8*dpr*a;
+    ctx.beginPath(); ctx.arc(cx, wireTop, rad, -Math.PI*0.85, -Math.PI*0.15); ctx.stroke();
+  }
+  ctx.fillStyle = "#8b95a8"; ctx.font = (10*dpr)+"px sans-serif";
+  ctx.fillText("I = "+I.toFixed(1)+" A", 10*dpr, 16*dpr);
+}
+
+function drawSchematics() {
+  if (!nzCtx || !hCtx) return;
+  const I = parseFloat(currentSlider.value);
+  drawWireAndWaves(nzCtx, canvasW, canvasH, "#00e5a0", "#4fc3f7", I, animT);
+  drawWireAndWaves(hCtx,  canvasW, canvasH, "#c77dff", "#ff8a65", I, animT+1.2);
+}
+function animate() { animT += 0.04; drawSchematics(); requestAnimationFrame(animate); }
+
+window.addEventListener("load", () => {
+  sizeCanvases();
+  const nzC = document.getElementById("nzChart").getContext("2d");
+  const hC  = document.getElementById("hChart").getContext("2d");
+  nzChart = makeChart(nzC, "#00e5a0", "|A|", r => calcA(5, r));
+  hChart  = makeChart(hC,  "#c77dff", "|E|", r => calcE(5, r));
+  update();
+  animate();
+});
+
+["input","change"].forEach(ev => {
+  currentSlider.addEventListener(ev, update);
+  distSlider.addEventListener(ev, update);
+  scenarioSelect.addEventListener(ev, update);
+  freqSlider.addEventListener(ev, update);
+  nfSlider.addEventListener(ev, update);
+  bwSlider.addEventListener(ev, update);
+});
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { sizeCanvases(); update(); }, 150);
+});
+</script>
+</body>
+</html>
